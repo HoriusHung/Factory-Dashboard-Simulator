@@ -85,6 +85,9 @@ If the operator lowers cooling and raises material feed, temperature and power s
 - Conveyor speed monitoring with a horizontal meter
 - Power consumption monitoring with a horizontal meter
 - Rolling Canvas trend charts for temperature and power
+- Production rate, efficiency, uptime, and total production estimate
+- Session energy consumption, peak power, and average running power
+- Machine health score and maintenance status
 - Two-level warning/critical alarm system
 - Warning and critical audio alerts via Web Audio API
 - System activity history with categories

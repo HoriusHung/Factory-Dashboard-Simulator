@@ -191,6 +191,17 @@ productionRate = Math.round(speedValue * 42 * (0.3 + materialFeedFactor * 0.7));
 
 When stopped, production rate is displayed as `0`.
 
+Derived metrics:
+
+```js
+totalProduction += productionRate * TICK_SECONDS / 60;
+sessionEnergyKWh += powerValue * TICK_SECONDS / 3600;
+peakPower = Math.max(peakPower, powerValue);
+averagePower = runningPowerSum / runningPowerSamples;
+```
+
+Machine health starts at `100`. Each tick adds a small delta based on the highest active alarm level: critical `-0.15`, warning `-0.05`, normal `+0.03`, clamped from `0` to `100`. Maintenance status is derived as: `>=90` Normal, `>=70` Monitor, `>=40` Service Soon, below that Critical Service.
+
 ## Alarm Thresholds
 
 | Parameter | Unit | Warning | Critical |
@@ -303,7 +314,7 @@ The dashboard displays two live charts:
 - Temperature
 - Power Consumption
 
-The sample model records temperature, pressure, speed, and power every tick, but only temperature and power are currently drawn as charts.
+The sample model currently records temperature and power every tick. The `state.samples` object also contains pressure and speed arrays for future use, but they are not populated or charted in the current build.
 
 Window size:
 

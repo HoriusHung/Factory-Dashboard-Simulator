@@ -33,29 +33,39 @@
       </div>
     </section>
 
-    <section class="summary-grid">
-      <article class="summary-card">
-        <span class="summary-label">Factory</span>
-        <strong id="summaryFactory">Stopped</strong>
+    <section class="kpi-row" aria-label="Key performance indicators">
+      <article class="kpi-card">
+        <span class="kpi-label">Factory</span>
+        <strong id="summaryFactory" class="stopped">Stopped</strong>
       </article>
-      <article class="summary-card">
-        <span class="summary-label">Active alerts</span>
+      <article class="kpi-card">
+        <span class="kpi-label">Active Alerts</span>
         <strong id="summaryAlerts">0</strong>
       </article>
-      <article class="summary-card">
-        <span class="summary-label">Production</span>
+      <article class="kpi-card">
+        <span class="kpi-label">Production Rate</span>
         <strong id="productionRate">0</strong>
-        <span class="summary-unit">items/min</span>
+        <span class="kpi-sub">items/min · total <span id="totalProduction">0</span></span>
       </article>
-      <article class="summary-card">
-        <span class="summary-label">Machine power</span>
-        <strong id="summaryPower">65%</strong>
-        <span class="summary-unit">setpoint</span>
+      <article class="kpi-card">
+        <span class="kpi-label">Efficiency</span>
+        <strong id="efficiencyValue">0%</strong>
+        <span class="kpi-sub">current setpoint</span>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Uptime</span>
+        <strong id="uptimeValue">00:00:00</strong>
+        <span class="kpi-sub">simulation time</span>
+      </article>
+      <article class="kpi-card">
+        <span class="kpi-label">Machine Health</span>
+        <strong id="machineHealthValue">100%</strong>
+        <span class="kpi-sub" id="machineHealthStatus">Normal</span>
       </article>
     </section>
 
     <main class="main-grid">
-      <section class="panel factory-panel">
+      <section class="panel factory-panel state-stopped">
         <div class="panel-heading">
           <h2>Production Line</h2>
           <span class="badge stopped" id="lineBadge">STOPPED</span>
@@ -147,7 +157,7 @@
               <div class="sensor-readout">
                 <strong id="temperatureValue">24.0</strong>
                 <span>°C</span>
-                <small>Warn &gt;70 · Critical &gt;85</small>
+                <small id="temperatureThresholdNote"></small>
               </div>
             </div>
           </article>
@@ -160,10 +170,12 @@
             <svg class="mini-dial" viewBox="0 0 180 105">
               <path class="dial-track" d="M22 88 A68 68 0 0 1 158 88" />
               <path class="dial-value" id="pressureDial" d="M22 88 A68 68 0 0 1 158 88" />
+              <line id="pressureWarningTick" stroke="#fbbf24" stroke-width="3" />
+              <line id="pressureCriticalTick" stroke="#ef4444" stroke-width="3" />
               <text x="90" y="82" text-anchor="middle" class="dial-number" id="pressureValue">1.8</text>
               <text x="90" y="101" text-anchor="middle" class="dial-unit">bar</text>
             </svg>
-            <small class="sensor-note">Warn &gt;6 · Critical &gt;8</small>
+            <small class="sensor-note" id="pressureThresholdNote"></small>
           </article>
 
           <article class="sensor-card horizontal" data-level="normal" id="speedCard">
@@ -177,10 +189,11 @@
             </div>
             <div class="horizontal-meter">
               <div class="meter-fill" id="speedMeter"></div>
-              <span class="threshold" style="left:66.66%"></span>
-              <span class="threshold critical" style="left:83.33%"></span>
+              <span class="threshold" id="speedWarningMarker"></span>
+              <span class="threshold critical" id="speedCriticalMarker"></span>
             </div>
-            <div class="scale"><span>0</span><span>warn 2.0</span><span>crit 2.5</span><span>3.0</span></div>
+            <div class="scale"><span>0</span><span>warn</span><span>crit</span><span>3.0</span></div>
+            <small class="sensor-note">Setpoint: <strong id="speedSetpointValue">1.5 m/s</strong></small>
           </article>
 
           <article class="sensor-card horizontal" data-level="normal" id="powerCard">
@@ -194,10 +207,11 @@
             </div>
             <div class="horizontal-meter">
               <div class="meter-fill" id="powerMeter"></div>
-              <span class="threshold" style="left:61.53%"></span>
-              <span class="threshold critical" style="left:76.92%"></span>
+              <span class="threshold" id="powerWarningMarker"></span>
+              <span class="threshold critical" id="powerCriticalMarker"></span>
             </div>
-            <div class="scale"><span>0</span><span>warn 80</span><span>crit 100</span><span>130</span></div>
+            <div class="scale"><span>0</span><span>warn</span><span>crit</span><span>130</span></div>
+            <small class="sensor-note">Peak <strong id="peakPowerValue">4.0 kW</strong> · Avg <strong id="avgPowerValue">4.0 kW</strong> · Session <strong id="energyValue">0.000 kWh</strong></small>
           </article>
         </div>
       </section>
@@ -210,37 +224,46 @@
           <button class="ghost-btn" id="soundToggle">SOUND ON</button>
         </div>
 
-        <div class="action-row">
-          <button class="action start" id="startButton">START</button>
-          <button class="action stop" id="stopButton">STOP</button>
-          <button class="action reset" id="resetButton">RESET</button>
+        <div class="control-group">
+          <h3>Simulation</h3>
+          <div class="action-row">
+            <button class="action start" id="startButton">START</button>
+            <button class="action stop" id="stopButton">STOP</button>
+            <button class="action reset" id="resetButton">RESET</button>
+          </div>
         </div>
 
-        <div class="slider-list">
+        <div class="control-group">
+          <h3>Process Setpoints</h3>
           <label class="slider-row">
             <span>Machine Power <strong id="machinePowerLabel">65%</strong></span>
             <input type="range" id="machinePower" min="0" max="100" value="65" />
           </label>
-
           <label class="slider-row">
             <span>Conveyor Speed Setpoint <strong id="conveyorSetpointLabel">1.5 m/s</strong></span>
             <input type="range" id="conveyorSetpoint" min="0" max="2.8" step="0.1" value="1.5" />
           </label>
-
-          <label class="slider-row">
-            <span>Cooling Intensity <strong id="coolingIntensityLabel">60%</strong></span>
-            <input type="range" id="coolingIntensity" min="0" max="100" value="60" />
-          </label>
-
-          <label class="slider-row">
-            <span>Material Feed Rate <strong id="materialFeedLabel">50%</strong></span>
-            <input type="range" id="materialFeed" min="0" max="100" value="50" />
-          </label>
-
           <label class="slider-row">
             <span>Pressure Setpoint <strong id="pressureSetpointLabel">4.0 bar</strong></span>
             <input type="range" id="pressureSetpoint" min="1" max="8" step="0.1" value="4.0" />
           </label>
+          <label class="slider-row">
+            <span>Material Feed Rate <strong id="materialFeedLabel">50%</strong></span>
+            <input type="range" id="materialFeed" min="0" max="100" value="50" />
+          </label>
+        </div>
+
+        <div class="control-group">
+          <h3>Facility</h3>
+          <label class="slider-row">
+            <span>Cooling Intensity <strong id="coolingIntensityLabel">60%</strong></span>
+            <input type="range" id="coolingIntensity" min="0" max="100" value="60" />
+          </label>
+        </div>
+
+        <div class="control-group">
+          <h3>System</h3>
+          <button class="ghost-btn full-width" id="clearHistory">CLEAR HISTORY</button>
         </div>
       </section>
 
@@ -263,23 +286,10 @@
 
       <section class="panel history-panel">
         <div class="panel-heading">
-          <h2>System Activity History</h2>
-          <button class="ghost-btn" id="clearHistory">CLEAR HISTORY</button>
+          <h2>System Activity</h2>
+          <span class="muted">latest events · local only</span>
         </div>
-        <div class="history-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Category</th>
-                <th>Event</th>
-                <th>Details</th>
-                <th>State</th>
-              </tr>
-            </thead>
-            <tbody id="historyBody"></tbody>
-          </table>
-        </div>
+        <ul class="history-stream" id="historyStream"></ul>
         <p class="history-note">Clearing history only removes the browser's local event list.</p>
       </section>
     </section>

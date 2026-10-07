@@ -26,7 +26,31 @@ const state = {
     pressure: [],
     speed: [],
     power: []
+  },
+  metrics: {
+    totalProduction: 0,
+    sessionEnergyKWh: 0,
+    peakPower: 4,
+    runningPowerSum: 0,
+    runningPowerSamples: 0,
+    machineHealth: 100,
+    maintenanceLevel: 'normal'
   }
+};
+
+const DEFAULT_CONTROLS = {
+  machinePower: 65,
+  conveyorSetpoint: 1.5,
+  coolingIntensity: 60,
+  materialFeed: 50,
+  pressureSetpoint: 4.0
+};
+
+const DEFAULT_SENSOR_VALUES = {
+  temperature: { value: 24, target: 24 },
+  pressure: { value: 1.8, target: 1.8 },
+  speed: { value: 0, target: 0 },
+  power: { value: 4, target: 4 }
 };
 
 const sensors = {
@@ -67,7 +91,11 @@ const dom = {
   summaryFactory: $('summaryFactory'),
   summaryAlerts: $('summaryAlerts'),
   productionRate: $('productionRate'),
-  summaryPower: $('summaryPower'),
+  totalProduction: $('totalProduction'),
+  efficiencyValue: $('efficiencyValue'),
+  uptimeValue: $('uptimeValue'),
+  machineHealthValue: $('machineHealthValue'),
+  machineHealthStatus: $('machineHealthStatus'),
   lineBadge: $('lineBadge'),
   factoryPanel: document.querySelector('.factory-panel'),
   startButton: $('startButton'),
@@ -75,7 +103,7 @@ const dom = {
   resetButton: $('resetButton'),
   soundToggle: $('soundToggle'),
   clearHistory: $('clearHistory'),
-  historyBody: $('historyBody'),
+  historyStream: $('historyStream'),
   machinePower: $('machinePower'),
   conveyorSetpoint: $('conveyorSetpoint'),
   coolingIntensity: $('coolingIntensity'),
@@ -85,7 +113,11 @@ const dom = {
   conveyorSetpointLabel: $('conveyorSetpointLabel'),
   coolingIntensityLabel: $('coolingIntensityLabel'),
   materialFeedLabel: $('materialFeedLabel'),
-  pressureSetpointLabel: $('pressureSetpointLabel')
+  pressureSetpointLabel: $('pressureSetpointLabel'),
+  speedSetpointValue: $('speedSetpointValue'),
+  peakPowerValue: $('peakPowerValue'),
+  avgPowerValue: $('avgPowerValue'),
+  energyValue: $('energyValue')
 };
 
 /* ------------------------- Sensor simulation ------------------------- */
@@ -121,10 +153,81 @@ function updateSensors() {
 }
 
 function recordSamples() {
-  Object.entries(sensors).forEach(([key, sensor]) => {
+  // Only temperature and power are charted. Avoid recording unused pressure/speed series.
+  ['temperature', 'power'].forEach((key) => {
+    const sensor = sensors[key];
     state.samples[key].push({ time: state.elapsedSeconds, value: sensor.value });
     if (state.samples[key].length > MAX_SAMPLES) state.samples[key].shift();
   });
+}
+
+/* ------------------------- Derived metrics ------------------------- */
+function currentProductionRate() {
+  if (!state.factoryRunning) return 0;
+  const feedFactor = state.controls.materialFeed / 100;
+  return Math.round(sensors.speed.value * 42 * (0.3 + feedFactor * 0.7));
+}
+
+function expectedProductionRate() {
+  if (!state.factoryRunning) return 0;
+  const feedFactor = state.controls.materialFeed / 100;
+  return state.controls.conveyorSetpoint * 42 * (0.3 + feedFactor * 0.7);
+}
+
+function productionEfficiency() {
+  const expected = expectedProductionRate();
+  if (!state.factoryRunning || expected <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((currentProductionRate() / expected) * 100)));
+}
+
+function averagePowerWhileRunning() {
+  const { runningPowerSum, runningPowerSamples } = state.metrics;
+  return runningPowerSamples > 0 ? runningPowerSum / runningPowerSamples : sensors.power.value;
+}
+
+function getMaintenanceLevel(health) {
+  if (health >= 90) return 'normal';
+  if (health >= 70) return 'monitor';
+  if (health >= 40) return 'service';
+  return 'critical';
+}
+
+function updateMachineHealth() {
+  const level = highestLevel();
+  let delta = 0.03;
+
+  if (level === 'critical') delta = -0.15;
+  else if (level === 'warning') delta = -0.05;
+
+  state.metrics.machineHealth = Math.max(0, Math.min(100, state.metrics.machineHealth + delta));
+
+  const nextLevel = getMaintenanceLevel(state.metrics.machineHealth);
+  if (nextLevel !== state.metrics.maintenanceLevel) {
+    const previousLevel = state.metrics.maintenanceLevel;
+    state.metrics.maintenanceLevel = nextLevel;
+
+    if (nextLevel === 'critical') {
+      addEvent('CRITICAL', 'Machine health critical', 'Machine health dropped below 40%', currentFactoryState());
+    } else if (nextLevel === 'service') {
+      addEvent('WARNING', 'Maintenance required', 'Machine health dropped below 70%', currentFactoryState());
+    } else if (nextLevel === 'monitor') {
+      addEvent('SYSTEM', 'Machine health monitor', 'Machine health dropped below 90%', currentFactoryState());
+    } else if (previousLevel !== 'normal') {
+      addEvent('SYSTEM', 'Machine health normal', 'Machine health recovered to 90% or higher', currentFactoryState());
+    }
+  }
+}
+
+function updateDerivedMetrics() {
+  if (state.factoryRunning) {
+    state.metrics.totalProduction += (currentProductionRate() * TICK_SECONDS) / 60;
+    state.metrics.sessionEnergyKWh += (sensors.power.value * TICK_SECONDS) / 3600;
+    state.metrics.peakPower = Math.max(state.metrics.peakPower, sensors.power.value);
+    state.metrics.runningPowerSum += sensors.power.value;
+    state.metrics.runningPowerSamples += 1;
+  }
+
+  updateMachineHealth();
 }
 
 /* ------------------------- Alarm levels ------------------------- */
@@ -193,30 +296,29 @@ function addEvent(category, eventType, description, systemState) {
     description,
     systemState
   });
+
   if (eventLog.length > 120) eventLog.pop();
   renderHistory();
 }
 
 function renderHistory() {
   if (eventLog.length === 0) {
-    dom.historyBody.innerHTML = '<tr><td colspan="5">No events recorded yet.</td></tr>';
+    dom.historyStream.innerHTML = '<li class="history-empty">No events recorded yet.</li>';
     return;
   }
 
-  dom.historyBody.innerHTML = eventLog.map((event) => `
-    <tr data-category="${event.category}">
-      <td>${event.time}</td>
-      <td>${event.category}</td>
-      <td>${event.eventType}</td>
-      <td>${event.description}</td>
-      <td>${event.systemState}</td>
-    </tr>
+  dom.historyStream.innerHTML = eventLog.slice(0, 8).map((event) => `
+    <li data-category="${event.category}">
+      <span class="history-time">${event.time}</span>
+      <span class="history-category">${event.category}</span>
+      <span class="history-text"><strong>${event.eventType}</strong><small>${event.description}</small></span>
+      <span class="history-state">${event.systemState}</span>
+    </li>
   `).join('');
 }
 
 /* ------------------------- Visual updates ------------------------- */
 function updateSensorMonitors() {
-  // Temperature uses a compact vertical meter.
   const temperatureFraction = sensors.temperature.value / sensors.temperature.max;
   $('temperatureMeter').style.height = `${Math.max(0, Math.min(100, temperatureFraction * 100))}%`;
   $('temperatureValue').textContent = sensors.temperature.value.toFixed(sensors.temperature.decimals);
@@ -224,7 +326,6 @@ function updateSensorMonitors() {
   $('temperatureLevel').className = `level ${sensorLevel.temperature}`;
   $('temperatureCard').dataset.level = sensorLevel.temperature;
 
-  // Pressure uses a compact semi-circular gauge.
   const pressureFraction = sensors.pressure.value / sensors.pressure.max;
   $('pressureDial').style.strokeDashoffset = String(220 * (1 - Math.max(0, Math.min(1, pressureFraction))));
   $('pressureValue').textContent = sensors.pressure.value.toFixed(sensors.pressure.decimals);
@@ -232,36 +333,60 @@ function updateSensorMonitors() {
   $('pressureLevel').className = `level ${sensorLevel.pressure}`;
   $('pressureCard').dataset.level = sensorLevel.pressure;
 
-  // Conveyor speed uses a horizontal load meter.
   $('speedMeter').style.width = `${Math.max(0, Math.min(100, (sensors.speed.value / sensors.speed.max) * 100))}%`;
   $('speedValue').textContent = sensors.speed.value.toFixed(sensors.speed.decimals);
   $('speedLevel').textContent = sensorLevel.speed.toUpperCase();
   $('speedLevel').className = `level ${sensorLevel.speed}`;
   $('speedCard').dataset.level = sensorLevel.speed;
 
-  // Power uses a horizontal load meter.
   $('powerMeter').style.width = `${Math.max(0, Math.min(100, (sensors.power.value / sensors.power.max) * 100))}%`;
   $('powerValue').textContent = sensors.power.value.toFixed(sensors.power.decimals);
   $('powerLevel').textContent = sensorLevel.power.toUpperCase();
   $('powerLevel').className = `level ${sensorLevel.power}`;
   $('powerCard').dataset.level = sensorLevel.power;
+
+  const speed = Math.max(0.2, sensors.speed.value);
+  const productDuration = Math.max(3, Math.min(12, 10 / (0.5 + speed * 1.5)));
+  dom.factoryPanel.style.setProperty('--product-duration', `${productDuration}s`);
+  dom.factoryPanel.style.setProperty('--belt-duration', `${Math.max(0.7, productDuration / 5)}s`);
 }
 
 function updateSummary() {
+  const alerts = activeAlertCount();
+  const level = highestLevel();
+
   dom.summaryFactory.textContent = state.factoryRunning ? 'Running' : 'Stopped';
   dom.summaryFactory.className = state.factoryRunning ? 'running' : 'stopped';
   dom.factoryStatusPill.innerHTML = `<span class="dot"></span> FACTORY ${state.factoryRunning ? 'RUNNING' : 'STOPPED'}`;
   dom.factoryStatusPill.className = `status-pill ${state.factoryRunning ? 'running' : 'stopped'}`;
   dom.lineBadge.textContent = state.factoryRunning ? 'RUNNING' : 'STOPPED';
   dom.lineBadge.className = `badge ${state.factoryRunning ? 'running' : 'stopped'}`;
-  dom.factoryPanel.classList.toggle('factory-running', state.factoryRunning);
 
-  const alerts = activeAlertCount();
+  dom.factoryPanel.classList.remove('state-running', 'state-stopped', 'state-warning', 'state-critical');
+  if (level === 'critical') dom.factoryPanel.classList.add('state-critical');
+  else if (level === 'warning') dom.factoryPanel.classList.add('state-warning');
+  else if (state.factoryRunning) dom.factoryPanel.classList.add('state-running');
+  else dom.factoryPanel.classList.add('state-stopped');
+
   dom.summaryAlerts.textContent = String(alerts);
-  dom.productionRate.textContent = state.factoryRunning
-    ? String(Math.round(sensors.speed.value * 42 * (0.3 + state.controls.materialFeed / 100 * 0.7)))
-    : '0';
-  dom.summaryPower.textContent = `${state.controls.machinePower}%`;
+  dom.productionRate.textContent = String(currentProductionRate());
+  dom.totalProduction.textContent = String(Math.floor(state.metrics.totalProduction));
+  dom.efficiencyValue.textContent = `${productionEfficiency()}%`;
+  dom.uptimeValue.textContent = formatClock(state.elapsedSeconds);
+
+  dom.machineHealthValue.textContent = `${Math.round(state.metrics.machineHealth)}%`;
+  const maintenanceText = {
+    normal: 'Normal',
+    monitor: 'Monitor',
+    service: 'Service Soon',
+    critical: 'Critical Service'
+  };
+  dom.machineHealthStatus.textContent = maintenanceText[state.metrics.maintenanceLevel];
+
+  dom.peakPowerValue.textContent = `${state.metrics.peakPower.toFixed(1)} kW`;
+  dom.avgPowerValue.textContent = `${averagePowerWhileRunning().toFixed(1)} kW`;
+  dom.energyValue.textContent = `${state.metrics.sessionEnergyKWh.toFixed(3)} kWh`;
+  dom.speedSetpointValue.textContent = `${Number(state.controls.conveyorSetpoint).toFixed(1)} m/s`;
 }
 
 function updateAlarmStrip() {
@@ -279,7 +404,7 @@ function updateAlarmStrip() {
     return;
   }
 
-  dom.alarmMark.textContent = level === 'critical' ? '!' : '!';
+  dom.alarmMark.textContent = level === 'critical' ? '×' : '!';
   dom.alarmHeadline.textContent = level === 'critical' ? 'Critical alert' : 'Warning alert';
   dom.alarmDetail.textContent = meta ? meta.message : 'A simulated threshold has been crossed.';
   dom.alarmValue.textContent = meta ? `${meta.parameter}: ${meta.value}` : '—';
@@ -401,7 +526,6 @@ function playCriticalSiren() {
   ensureAudio();
   if (!audioContext) return;
 
-  // Short two-tone siren: alternating low/high, never a continuous loop.
   for (let i = 0; i < 6; i += 1) {
     makeTone(i % 2 === 0 ? 880 : 660, i * 0.22, 0.18, 0.045, 'triangle');
   }
@@ -414,6 +538,7 @@ function setControlLabels() {
   dom.coolingIntensityLabel.textContent = `${state.controls.coolingIntensity}%`;
   dom.materialFeedLabel.textContent = `${state.controls.materialFeed}%`;
   dom.pressureSetpointLabel.textContent = `${Number(state.controls.pressureSetpoint).toFixed(1)} bar`;
+  dom.speedSetpointValue.textContent = `${Number(state.controls.conveyorSetpoint).toFixed(1)} m/s`;
 }
 
 function bindControls() {
@@ -421,13 +546,13 @@ function bindControls() {
     state.factoryRunning = true;
     ensureAudio();
     addEvent('SYSTEM', 'System started', 'Factory simulation started', 'RUNNING');
-    refreshStatic();
+    refreshUi();
   });
 
   dom.stopButton.addEventListener('click', () => {
     state.factoryRunning = false;
     addEvent('SYSTEM', 'System stopped', 'Factory simulation stopped', 'STOPPED');
-    refreshStatic();
+    refreshUi();
   });
 
   dom.resetButton.addEventListener('click', resetSimulation);
@@ -466,18 +591,12 @@ function bindSlider(input, key, eventName, formatter) {
 function resetSimulation() {
   state.factoryRunning = false;
   state.elapsedSeconds = 0;
-  state.controls = {
-    machinePower: 65,
-    conveyorSetpoint: 1.5,
-    coolingIntensity: 60,
-    materialFeed: 50,
-    pressureSetpoint: 4.0
-  };
+  state.controls = { ...DEFAULT_CONTROLS };
 
-  sensors.temperature.value = 24; sensors.temperature.target = 24;
-  sensors.pressure.value = 1.8; sensors.pressure.target = 1.8;
-  sensors.speed.value = 0; sensors.speed.target = 0;
-  sensors.power.value = 4; sensors.power.target = 4;
+  Object.entries(DEFAULT_SENSOR_VALUES).forEach(([key, defaults]) => {
+    sensors[key].value = defaults.value;
+    sensors[key].target = defaults.target;
+  });
 
   Object.keys(sensorLevel).forEach((key) => {
     sensorLevel[key] = 'normal';
@@ -488,21 +607,56 @@ function resetSimulation() {
     state.samples[key] = [];
   });
 
+  state.metrics = {
+    totalProduction: 0,
+    sessionEnergyKWh: 0,
+    peakPower: DEFAULT_SENSOR_VALUES.power.value,
+    runningPowerSum: 0,
+    runningPowerSamples: 0,
+    machineHealth: 100,
+    maintenanceLevel: 'normal'
+  };
+
   eventLog.length = 0;
-  dom.machinePower.value = '65';
-  dom.conveyorSetpoint.value = '1.5';
-  dom.coolingIntensity.value = '60';
-  dom.materialFeed.value = '50';
-  dom.pressureSetpoint.value = '4.0';
+  dom.machinePower.value = String(DEFAULT_CONTROLS.machinePower);
+  dom.conveyorSetpoint.value = String(DEFAULT_CONTROLS.conveyorSetpoint);
+  dom.coolingIntensity.value = String(DEFAULT_CONTROLS.coolingIntensity);
+  dom.materialFeed.value = String(DEFAULT_CONTROLS.materialFeed);
+  dom.pressureSetpoint.value = String(DEFAULT_CONTROLS.pressureSetpoint);
 
   setControlLabels();
   addEvent('SYSTEM', 'Simulation reset', 'Dashboard returned to safe initial conditions', 'STOPPED');
-  refreshStatic();
+  refreshUi();
   drawCharts();
 }
 
+/* ------------------------- Layout helpers ------------------------- */
+function positionThresholdMarkers() {
+  $('speedWarningMarker').style.left = `${(sensors.speed.warning / sensors.speed.max) * 100}%`;
+  $('speedCriticalMarker').style.left = `${(sensors.speed.critical / sensors.speed.max) * 100}%`;
+  $('powerWarningMarker').style.left = `${(sensors.power.warning / sensors.power.max) * 100}%`;
+  $('powerCriticalMarker').style.left = `${(sensors.power.critical / sensors.power.max) * 100}%`;
+
+  $('temperatureThresholdNote').textContent = `Warn >${sensors.temperature.warning} · Critical >${sensors.temperature.critical}`;
+  $('pressureThresholdNote').textContent = `Warn >${sensors.pressure.warning} · Critical >${sensors.pressure.critical}`;
+}
+
+function positionPressureTick(element, value) {
+  const cx = 90;
+  const cy = 88;
+  const outer = 68;
+  const inner = 60;
+  const fraction = Math.max(0, Math.min(1, value / sensors.pressure.max));
+  const angle = Math.PI - fraction * Math.PI;
+
+  element.setAttribute('x1', String(cx + inner * Math.cos(angle)));
+  element.setAttribute('y1', String(cy - inner * Math.sin(angle)));
+  element.setAttribute('x2', String(cx + outer * Math.cos(angle)));
+  element.setAttribute('y2', String(cy - outer * Math.sin(angle)));
+}
+
 /* ------------------------- Main loop / refresh ------------------------- */
-function refreshStatic() {
+function refreshUi() {
   dom.simulationClock.textContent = formatClock(state.elapsedSeconds);
   updateSummary();
   updateAlarmStrip();
@@ -516,6 +670,7 @@ function simulationTick() {
   updateSensors();
   recordSamples();
   evaluateAlarms();
+  updateDerivedMetrics();
 
   dom.simulationClock.textContent = formatClock(state.elapsedSeconds);
   updateSummary();
@@ -534,8 +689,11 @@ function formatClock(totalSeconds) {
 function initialize() {
   bindControls();
   setControlLabels();
+  positionThresholdMarkers();
+  positionPressureTick($('pressureWarningTick'), sensors.pressure.warning);
+  positionPressureTick($('pressureCriticalTick'), sensors.pressure.critical);
   addEvent('SYSTEM', 'Dashboard initialized', 'Local simulation ready', 'STOPPED');
-  refreshStatic();
+  refreshUi();
   drawCharts();
   window.addEventListener('resize', drawCharts);
   window.setInterval(simulationTick, TICK_SECONDS * 1000);
