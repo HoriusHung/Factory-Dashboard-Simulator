@@ -17,9 +17,26 @@ This project does not connect to real industrial equipment, PLCs, sensors, SCADA
 
 ---
 
-## System Architecture
+## How to Use
 
-The simulator is organized as a small vanilla JavaScript application:
+1. Press **START** to begin the simulated factory run.
+2. Monitor sensors, factory status, active alarms, production rate, and trend charts.
+3. Adjust controls such as Machine Power, Cooling Intensity, Material Feed Rate, Conveyor Speed Setpoint, and Pressure Setpoint to observe the simulated response.
+
+---
+
+## System Overview
+
+The dashboard simulates a simplified production line with four monitored parameters:
+
+- **Temperature**: thermal load of the simulated line.
+- **Pressure**: operating pressure around the selected setpoint.
+- **Conveyor Speed**: simulated movement speed of the production line.
+- **Power Consumption**: estimated electrical load of the simulated equipment.
+
+The control system does not command real machines. It changes local simulation targets for the next sensor update cycle. Temperature, pressure, conveyor speed, and power then move smoothly toward those targets instead of jumping instantly.
+
+At a high level, the simulation loop is:
 
 ```text
 User Controls
@@ -35,7 +52,27 @@ Alarm Evaluation
 System Activity History
 ```
 
-A central `state` object stores factory status, elapsed simulation time, control values, sensor samples, and sound settings. A `setInterval` loop updates targets, interpolates sensor values, evaluates thresholds, refreshes the UI, and redraws charts.
+---
+
+## Example
+
+Example operating state:
+
+- Factory: **RUNNING**
+- Machine Power: **65%**
+- Conveyor Speed Setpoint: **1.5 m/s**
+- Cooling Intensity: **60%**
+- Material Feed Rate: **50%**
+- Pressure Setpoint: **4.0 bar**
+
+With these defaults, the dashboard usually trends toward approximate values like:
+
+- Temperature: around `55–57 °C`
+- Pressure: around `4.7–4.9 bar`
+- Conveyor Speed: around `1.4–1.5 m/s`
+- Power: around `66–70 kW`
+
+If the operator lowers cooling and raises material feed, temperature and power should trend upward. If pressure setpoint is raised toward `8 bar`, pressure and active alerts may cross warning/critical thresholds.
 
 ---
 
@@ -66,7 +103,7 @@ A central `state` object stores factory status, elapsed simulation time, control
 | Power Consumption | kW | Simulated electrical load | Machine power, material feed, conveyor speed |
 | Cooling Intensity | % | Operator control that reduces thermal load | Temperature target |
 | Material Feed Rate | % | Operator-set production load | Temperature, pressure, power, production estimate |
-| Machine Power | % | Primary simulated drive level | Temperature, pressure, speed, power |
+| Machine Power | % | Primary simulated drive level | Temperature, pressure, power |
 
 ---
 
@@ -94,7 +131,7 @@ Alarm thresholds are fictional simulation thresholds and are **not** real indust
 |---|---|
 | START | Starts the factory simulation and conveyor animation |
 | STOP | Stops the simulation; values gradually return toward idle |
-| RESET | Restores default parameters and clears local history/alarm state |
+| RESET | Restores default parameters, safe sensor values, clears local history/alarm state, stops the simulation, and preserves the current sound on/off setting |
 | Machine Power | Raises or lowers the primary simulated drive level |
 | Conveyor Speed Setpoint | Sets the target conveyor speed |
 | Cooling Intensity | Increases cooling to reduce temperature, or reduces cooling |
@@ -126,7 +163,9 @@ Factory-Dashboard-Simulator/
 ├── styles.css
 ├── script.js
 ├── README.md
-└── LICENSE
+├── LICENSE
+└── docs/
+    └── methodology.md
 ```
 
 ---
@@ -138,7 +177,7 @@ Factory-Dashboard-Simulator/
 3. `calculateTargets()` converts controls into target sensor values.
 4. `updateSensors()` smoothly interpolates current values toward targets.
 5. `evaluateAlarms()` compares values against warning and critical thresholds.
-6. The UI refreshes meters, values, summary cards, alarm strip, history, and charts.
+6. The UI refreshes summary cards, alarm strip, sensor monitors, history, and charts.
 
 Simplified loop:
 
@@ -148,7 +187,9 @@ setInterval(() => {
   updateSensors();
   recordSamples();
   evaluateAlarms();
-  refreshUi();
+  updateSummary();
+  updateAlarmStrip();
+  updateSensorMonitors();
   drawCharts();
 }, 500);
 ```
@@ -176,7 +217,7 @@ No verified GitHub Pages URL is currently present in the project files. Add the 
 
 ## Preview
 
-No screenshot is currently included in the repository.
+Screenshot placeholder: add your actual dashboard screenshot file later and reference it here.
 
 ---
 
