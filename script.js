@@ -413,8 +413,8 @@ function updateAlarmStrip() {
 
 /* ------------------------- Trends ------------------------- */
 const charts = {
-  temperature: { canvas: $('temperatureTrend'), color: sensors.temperature.color, max: 100 },
-  power: { canvas: $('powerTrend'), color: sensors.power.color, max: 130 }
+  temperature: { canvas: $('temperatureTrend'), color: sensors.temperature.color, max: 100, sensor: 'temperature' },
+  power: { canvas: $('powerTrend'), color: sensors.power.color, max: 130, sensor: 'power' }
 };
 
 function resizeCanvas(canvas) {
@@ -440,21 +440,19 @@ function drawChart(key) {
   const width = rect.width;
   const height = rect.height;
   const samples = state.samples[key];
+  const sensor = sensors[config.sensor];
 
   ctx.clearRect(0, 0, width, height);
-  ctx.strokeStyle = 'rgba(148, 163, 184, 0.14)';
-  ctx.lineWidth = 1;
 
-  for (let i = 1; i < 4; i += 1) {
-    const y = (height / 4) * i;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
+  // Draw background grid and threshold lines
+  drawGridAndThresholds(ctx, width, height, config, sensor);
+
+  if (samples.length < 2) {
+    drawNoDataLabel(ctx, width, height, config.color);
+    return;
   }
 
-  if (samples.length < 2) return;
-
+  // Draw area fill
   ctx.beginPath();
   samples.forEach((sample, index) => {
     const x = (index / (MAX_SAMPLES - 1)) * width;
@@ -462,20 +460,98 @@ function drawChart(key) {
     if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
-
-  ctx.strokeStyle = config.color;
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
   ctx.lineTo(width, height);
   ctx.lineTo(0, height);
   ctx.closePath();
   ctx.fillStyle = `${config.color}22`;
   ctx.fill();
 
+  // Draw line
+  ctx.beginPath();
+  samples.forEach((sample, index) => {
+    const x = (index / (MAX_SAMPLES - 1)) * width;
+    const y = height - (Math.max(0, Math.min(config.max, sample.value)) / config.max) * height;
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = config.color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Draw current value label
   ctx.fillStyle = '#829bad';
   ctx.font = '11px Consolas, monospace';
-  ctx.fillText(`${sensors[key].value.toFixed(sensors[key].decimals)} ${sensors[key].unit}`, 8, 16);
+  ctx.fillText(`${sensor.value.toFixed(sensor.decimals)} ${sensor.unit}`, 8, 16);
+}
+
+function drawGridAndThresholds(ctx, width, height, config, sensor) {
+  const gridColor = 'rgba(148, 163, 184, 0.1)';
+  const labelColor = '#64748b';
+  const font = '10px Consolas, monospace';
+  ctx.font = font;
+
+  // Horizontal grid lines (4 lines = 5 zones)
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 5; i += 1) {
+    const y = (height / 5) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+
+  // Vertical grid lines (time markers: -60s, -45s, -30s, -15s, now)
+  for (let i = 0; i <= 4; i += 1) {
+    const x = (width / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+
+    // Time labels at bottom
+    const timeLabels = ['-60s', '-45s', '-30s', '-15s', 'now'];
+    ctx.fillStyle = labelColor;
+    ctx.textAlign = i === 0 ? 'left' : i === 4 ? 'right' : 'center';
+    ctx.fillText(timeLabels[i], x + (i === 0 ? 4 : i === 4 ? -4 : 0), height - 4);
+  }
+
+  // Y-axis labels (min, mid, max)
+  const yLabels = [config.max, Math.round(config.max / 2), 0];
+  ctx.fillStyle = labelColor;
+  ctx.textAlign = 'right';
+  for (let i = 0; i < 3; i += 1) {
+    const y = (height / 2) * i;
+    ctx.fillText(String(yLabels[i]), 4, y + (i === 0 ? 12 : i === 2 ? 4 : 4));
+  }
+
+  // Threshold lines (warning and critical)
+  const drawThreshold = (value, color, label) => {
+    if (value <= 0 || value > config.max) return;
+    const y = height - (value / config.max) * height;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Threshold label
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    ctx.fillText(`${label} ${value}${sensor.unit}`, 6, y - 4);
+  };
+
+  drawThreshold(sensor.warning, '#fbbf24', 'WARN');
+  drawThreshold(sensor.critical, '#ef4444', 'CRIT');
+}
+
+function drawNoDataLabel(ctx, width, height, color) {
+  ctx.fillStyle = '#64748b';
+  ctx.font = '12px Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('Waiting for data...', width / 2, height / 2);
 }
 
 function drawCharts() {
