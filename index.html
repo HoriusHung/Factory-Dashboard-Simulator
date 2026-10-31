@@ -18,6 +18,7 @@
         <div class="status-pill stopped" id="factoryStatusPill"><span class="dot"></span> FACTORY STOPPED</div>
         <div class="status-pill" id="alarmCountPill"><span class="dot"></span> <span id="summaryAlerts">0</span> ALERTS</div>
         <div class="status-pill clock"><span class="muted">SIM</span> <strong id="simulationClock">00:00:00</strong></div>
+        <button class="ghost-btn" id="summaryOpenBtn">SESSION SUMMARY</button>
       </div>
     </header>
 
@@ -42,7 +43,7 @@
       <article class="kpi-card">
         <span class="kpi-label">Production Rate</span>
         <strong id="productionRate">0</strong>
-        <span class="kpi-sub">items/min · total <span id="totalProduction">0</span></span>
+        <span class="kpi-sub">peak <span id="productionPeakValue">0</span> · total <span id="totalProduction">0</span></span>
       </article>
       <article class="kpi-card">
         <span class="kpi-label">Efficiency</span>
@@ -314,6 +315,59 @@
         <p class="history-note">Clearing history only removes the browser's local event list.</p>
       </section>
     </section>
+
+    <section class="panel analytics-panel">
+      <div class="panel-heading">
+        <h2>Production Analytics</h2>
+        <span class="muted">session metrics · rolling 60 s</span>
+      </div>
+      <div class="analytics-stats">
+        <div class="stat-card">
+          <span class="stat-label">Total Produced</span>
+          <strong id="totalProductionValue">0</strong>
+          <span class="stat-unit">units</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Actual Rate</span>
+          <strong id="actualRateValue">0</strong>
+          <span class="stat-unit">units/min</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Expected Rate</span>
+          <strong id="expectedRateValue">0</strong>
+          <span class="stat-unit">units/min</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Peak Rate</span>
+          <strong id="peakRateValue">0</strong>
+          <span class="stat-unit">units/min</span>
+        </div>
+      </div>
+      <div class="analytics-grid">
+        <div class="trend-card">
+          <div class="trend-title">Cumulative Production <span>units</span></div>
+          <canvas id="productionTotalTrend"></canvas>
+        </div>
+        <div class="trend-card">
+          <div class="trend-title">Actual vs Expected Rate <span>units/min</span></div>
+          <div class="chart-legend">
+            <span><i class="legend-line actual"></i>Actual</span>
+            <span><i class="legend-line expected"></i>Expected</span>
+          </div>
+          <canvas id="productionRateTrend"></canvas>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-overlay" id="sessionSummaryModal" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Session Summary</h2>
+        <button class="ghost-btn" id="summaryCloseBtn">CLOSE</button>
+      </div>
+      <div class="modal-body" id="summaryContent"></div>
+    </div>
   </div>
 
   <script src="script.js"></script>

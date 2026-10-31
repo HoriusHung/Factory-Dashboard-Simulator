@@ -25,10 +25,17 @@ const state = {
     temperature: [],
     pressure: [],
     speed: [],
-    power: []
+    power: [],
+    production: []
+  },
+  analytics: {
+    stoppedSeconds: 0,
+    sessionStarted: false
   },
   metrics: {
     totalProduction: 0,
+    expectedProductionTotal: 0,
+    peakProductionRate: 0,
     sessionEnergyKWh: 0,
     peakPower: 4,
     runningPowerSum: 0,
@@ -117,7 +124,16 @@ const dom = {
   speedSetpointValue: $('speedSetpointValue'),
   peakPowerValue: $('peakPowerValue'),
   avgPowerValue: $('avgPowerValue'),
-  energyValue: $('energyValue')
+  energyValue: $('energyValue'),
+  productionPeakValue: $('productionPeakValue'),
+  totalProductionValue: $('totalProductionValue'),
+  actualRateValue: $('actualRateValue'),
+  expectedRateValue: $('expectedRateValue'),
+  peakRateValue: $('peakRateValue'),
+  summaryModal: $('sessionSummaryModal'),
+  summaryContent: $('summaryContent'),
+  summaryCloseBtn: $('summaryCloseBtn'),
+  summaryOpenBtn: $('summaryOpenBtn')
 };
 
 /* ------------------------- Sensor simulation ------------------------- */
@@ -221,6 +237,8 @@ function updateMachineHealth() {
 function updateDerivedMetrics() {
   if (state.factoryRunning) {
     state.metrics.totalProduction += (currentProductionRate() * TICK_SECONDS) / 60;
+    state.metrics.expectedProductionTotal += (expectedProductionRate() * TICK_SECONDS) / 60;
+    state.metrics.peakProductionRate = Math.max(state.metrics.peakProductionRate, currentProductionRate());
     state.metrics.sessionEnergyKWh += (sensors.power.value * TICK_SECONDS) / 3600;
     state.metrics.peakPower = Math.max(state.metrics.peakPower, sensors.power.value);
     state.metrics.runningPowerSum += sensors.power.value;
@@ -303,18 +321,116 @@ function addEvent(category, eventType, description, systemState) {
 
 function renderHistory() {
   if (eventLog.length === 0) {
-    dom.historyStream.innerHTML = '<li class="history-empty">No events recorded yet.</li>';
+    const emptyItem = document.createElement('li');
+    emptyItem.className = 'history-empty';
+    emptyItem.textContent = 'No events recorded yet.';
+    dom.historyStream.replaceChildren(emptyItem);
     return;
   }
 
-  dom.historyStream.innerHTML = eventLog.slice(0, 8).map((event) => `
-    <li data-category="${event.category}">
-      <span class="history-time">${event.time}</span>
-      <span class="history-category">${event.category}</span>
-      <span class="history-text"><strong>${event.eventType}</strong><small>${event.description}</small></span>
-      <span class="history-state">${event.systemState}</span>
-    </li>
-  `).join('');
+  const fragment = document.createDocumentFragment();
+  eventLog.slice(0, 8).forEach((event) => {
+    const item = document.createElement('li');
+    item.dataset.category = event.category;
+
+    const time = document.createElement('span');
+    time.className = 'history-time';
+    time.textContent = event.time;
+
+    const category = document.createElement('span');
+    category.className = 'history-category';
+    category.textContent = event.category;
+
+    const text = document.createElement('span');
+    text.className = 'history-text';
+    const type = document.createElement('strong');
+    type.textContent = event.eventType;
+    const description = document.createElement('small');
+    description.textContent = event.description;
+    text.append(type, description);
+
+    const stateLabel = document.createElement('span');
+    stateLabel.className = 'history-state';
+    stateLabel.textContent = event.systemState;
+
+    item.append(time, category, text, stateLabel);
+    fragment.append(item);
+  });
+
+  dom.historyStream.replaceChildren(fragment);
+}
+
+/* ------------------------- Session summary ------------------------- */
+let lastSessionSnapshot = null;
+
+function captureSessionSnapshot() {
+  const total = state.metrics.totalProduction;
+  const runningMinutes = state.elapsedSeconds / 60;
+  const expectedTotal = state.metrics.expectedProductionTotal;
+  return {
+    runningSeconds: state.elapsedSeconds,
+    stoppedSeconds: state.analytics.stoppedSeconds,
+    totalProduction: Math.floor(total),
+    avgRate: state.elapsedSeconds > 0 ? total / runningMinutes : 0,
+    peakRate: state.metrics.peakProductionRate,
+    avgEfficiency: expectedTotal > 0 ? Math.max(0, Math.min(100, (total / expectedTotal) * 100)) : 0,
+    energyKWh: state.metrics.sessionEnergyKWh,
+    peakPower: state.metrics.peakPower,
+    hasSession: state.analytics.sessionStarted
+  };
+}
+
+function renderSessionSummary(snapshot) {
+  const rows = [
+    ['Running Time', formatClock(snapshot.runningSeconds)],
+    ['Stopped Time', formatClock(snapshot.stoppedSeconds)],
+    ['Total Production', `${snapshot.totalProduction.toLocaleString('en-US')} units`],
+    ['Average Production Rate', `${snapshot.avgRate.toFixed(1)} units/min`],
+    ['Peak Production Rate', `${snapshot.peakRate} units/min`],
+    ['Average Production Efficiency', `${snapshot.avgEfficiency.toFixed(1)}%`],
+    ['Energy Used', `${snapshot.energyKWh.toFixed(3)} kWh`],
+    ['Peak Power', `${snapshot.peakPower.toFixed(1)} kW`]
+  ];
+
+  const contentNodes = [];
+
+  if (!snapshot.hasSession) {
+    const note = document.createElement('p');
+    note.className = 'summary-note';
+    note.textContent = 'Start the simulation to begin a production session.';
+    contentNodes.push(note);
+  }
+
+  const rowsContainer = document.createElement('div');
+  rowsContainer.className = 'summary-rows';
+
+  rows.forEach(([label, value]) => {
+    const row = document.createElement('div');
+    row.className = 'summary-row';
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = label;
+
+    const valueStrong = document.createElement('strong');
+    valueStrong.textContent = value;
+
+    row.append(labelSpan, valueStrong);
+    rowsContainer.append(row);
+  });
+
+  contentNodes.push(rowsContainer);
+  dom.summaryContent.replaceChildren(...contentNodes);
+}
+
+function showSessionSummary() {
+  lastSessionSnapshot = captureSessionSnapshot();
+  renderSessionSummary(lastSessionSnapshot);
+  dom.summaryModal.hidden = false;
+}
+
+function hideSessionSummary() {
+  lastSessionSnapshot = null;
+  dom.summaryModal.hidden = true;
 }
 
 /* ------------------------- Visual updates ------------------------- */
@@ -351,13 +467,19 @@ function updateSensorMonitors() {
   dom.factoryPanel.style.setProperty('--belt-duration', `${Math.max(0.7, productDuration / 5)}s`);
 }
 
+function buildDotSpan() {
+  const dot = document.createElement('span');
+  dot.className = 'dot';
+  return dot;
+}
+
 function updateSummary() {
   const alerts = activeAlertCount();
   const level = highestLevel();
 
   dom.summaryFactory.textContent = state.factoryRunning ? 'Running' : 'Stopped';
   dom.summaryFactory.className = state.factoryRunning ? 'running' : 'stopped';
-  dom.factoryStatusPill.innerHTML = `<span class="dot"></span> FACTORY ${state.factoryRunning ? 'RUNNING' : 'STOPPED'}`;
+  dom.factoryStatusPill.replaceChildren(buildDotSpan(), document.createTextNode(` FACTORY ${state.factoryRunning ? 'RUNNING' : 'STOPPED'}`));
   dom.factoryStatusPill.className = `status-pill ${state.factoryRunning ? 'running' : 'stopped'}`;
   dom.lineBadge.textContent = state.factoryRunning ? 'RUNNING' : 'STOPPED';
   dom.lineBadge.className = `badge ${state.factoryRunning ? 'running' : 'stopped'}`;
@@ -370,9 +492,14 @@ function updateSummary() {
 
   dom.summaryAlerts.textContent = String(alerts);
   dom.productionRate.textContent = String(currentProductionRate());
-  dom.totalProduction.textContent = String(Math.floor(state.metrics.totalProduction));
+  dom.totalProduction.textContent = Math.floor(state.metrics.totalProduction).toLocaleString('en-US');
+  dom.productionPeakValue.textContent = String(state.metrics.peakProductionRate);
   dom.efficiencyValue.textContent = `${productionEfficiency()}%`;
   dom.uptimeValue.textContent = formatClock(state.elapsedSeconds);
+  dom.totalProductionValue.textContent = Math.floor(state.metrics.totalProduction).toLocaleString('en-US');
+  dom.actualRateValue.textContent = String(currentProductionRate());
+  dom.expectedRateValue.textContent = String(Math.round(expectedProductionRate()));
+  dom.peakRateValue.textContent = String(state.metrics.peakProductionRate);
 
   dom.machineHealthValue.textContent = `${Math.round(state.metrics.machineHealth)}%`;
   const maintenanceText = {
@@ -414,7 +541,9 @@ function updateAlarmStrip() {
 /* ------------------------- Trends ------------------------- */
 const charts = {
   temperature: { canvas: $('temperatureTrend'), color: sensors.temperature.color, max: 100, sensor: 'temperature' },
-  power: { canvas: $('powerTrend'), color: sensors.power.color, max: 130, sensor: 'power' }
+  power: { canvas: $('powerTrend'), color: sensors.power.color, max: 130, sensor: 'power' },
+  productionTotal: { canvas: $('productionTotalTrend'), color: '#34d399', kind: 'total' },
+  productionRate: { canvas: $('productionRateTrend'), color: '#38bdf8', kind: 'rate' }
 };
 
 function resizeCanvas(canvas) {
@@ -554,9 +683,131 @@ function drawNoDataLabel(ctx, width, height, color) {
   ctx.fillText('Waiting for data...', width / 2, height / 2);
 }
 
+/* ------------------------- Production charts ------------------------- */
+function recordProductionSample() {
+  if (!state.analytics.sessionStarted) return;
+  const samples = state.samples.production;
+  samples.push({
+    t: state.elapsedSeconds,
+    total: state.metrics.totalProduction,
+    actual: currentProductionRate(),
+    expected: expectedProductionRate()
+  });
+  if (samples.length > MAX_SAMPLES) samples.shift();
+}
+
+function niceCeil(value) {
+  if (value <= 10) return 10;
+  const pow = Math.pow(10, Math.floor(Math.log10(value)));
+  const n = value / pow;
+  const f = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+  return f * pow;
+}
+
+function drawProductionAxes(ctx, width, height) {
+  const gridColor = 'rgba(148, 163, 184, 0.1)';
+  const labelColor = '#64748b';
+  ctx.font = '10px Consolas, monospace';
+
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 5; i += 1) {
+    const y = (height / 5) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+
+  const timeLabels = ['-60s', '-45s', '-30s', '-15s', 'now'];
+  for (let i = 0; i <= 4; i += 1) {
+    const x = (width / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+    ctx.fillStyle = labelColor;
+    ctx.textAlign = i === 0 ? 'left' : i === 4 ? 'right' : 'center';
+    ctx.fillText(timeLabels[i], x + (i === 0 ? 4 : i === 4 ? -4 : 0), height - 4);
+  }
+}
+
+function drawProductionChart(key) {
+  const config = charts[key];
+  const ctx = resizeCanvas(config.canvas);
+  const rect = config.canvas.getBoundingClientRect();
+  const width = Math.max(1, rect.width);
+  const height = Math.max(1, rect.height);
+  const samples = state.samples.production;
+
+  ctx.clearRect(0, 0, width, height);
+  drawProductionAxes(ctx, width, height);
+
+  if (samples.length < 2) return;
+
+  const padTop = 14;
+  const padBottom = 4;
+  const plotH = height - padTop - padBottom;
+
+  if (config.kind === 'total') {
+    const maxValue = niceCeil(Math.max(...samples.map((s) => s.total), 0));
+    ctx.beginPath();
+    samples.forEach((s, i) => {
+      const x = (i / (MAX_SAMPLES - 1)) * width;
+      const y = padTop + plotH - (Math.max(0, s.total) / maxValue) * plotH;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = config.color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.lineTo(((samples.length - 1) / (MAX_SAMPLES - 1)) * width, padTop + plotH);
+    ctx.lineTo(0, padTop + plotH);
+    ctx.closePath();
+    ctx.fillStyle = `${config.color}22`;
+    ctx.fill();
+    ctx.fillStyle = '#64748b';
+    ctx.font = '10px Consolas, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(String(maxValue), 4, padTop + 4);
+    ctx.fillText(String(Math.round(maxValue / 2)), 4, padTop + plotH / 2 + 4);
+    ctx.fillText('0', 4, padTop + plotH + 4);
+  } else {
+    const maxValue = niceCeil(Math.max(...samples.flatMap((s) => [s.actual, s.expected]), 0));
+    const drawLine = (field, color, dashed) => {
+      ctx.beginPath();
+      samples.forEach((s, i) => {
+        const x = (i / (MAX_SAMPLES - 1)) * width;
+        const y = padTop + plotH - (s[field] / maxValue) * plotH;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      if (dashed) ctx.setLineDash([5, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+    drawLine('expected', '#829bad', true);
+    drawLine('actual', '#38bdf8', false);
+    ctx.fillStyle = '#64748b';
+    ctx.font = '10px Consolas, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(String(maxValue), 4, padTop + 4);
+    ctx.fillText(String(Math.round(maxValue / 2)), 4, padTop + plotH / 2 + 4);
+    ctx.fillText('0', 4, padTop + plotH + 4);
+  }
+}
+
+function drawProductionCharts() {
+  drawProductionChart('productionTotal');
+  drawProductionChart('productionRate');
+}
+
 function drawCharts() {
   drawChart('temperature');
   drawChart('power');
+  drawProductionCharts();
 }
 
 /* ------------------------- Audio ------------------------- */
@@ -619,6 +870,7 @@ function setControlLabels() {
 
 function bindControls() {
   dom.startButton.addEventListener('click', () => {
+    if (!state.analytics.sessionStarted) state.analytics.sessionStarted = true;
     state.factoryRunning = true;
     ensureAudio();
     addEvent('SYSTEM', 'System started', 'Factory simulation started', 'RUNNING');
@@ -626,9 +878,11 @@ function bindControls() {
   });
 
   dom.stopButton.addEventListener('click', () => {
+    if (!state.factoryRunning) return;
     state.factoryRunning = false;
     addEvent('SYSTEM', 'System stopped', 'Factory simulation stopped', 'STOPPED');
     refreshUi();
+    if (state.elapsedSeconds > 0) showSessionSummary();
   });
 
   dom.resetButton.addEventListener('click', resetSimulation);
@@ -665,6 +919,9 @@ function bindSlider(input, key, eventName, formatter) {
 }
 
 function resetSimulation() {
+  const hadSessionActivity = state.analytics.sessionStarted && (state.elapsedSeconds > 0 || state.metrics.totalProduction > 0);
+  if (hadSessionActivity) lastSessionSnapshot = captureSessionSnapshot();
+
   state.factoryRunning = false;
   state.elapsedSeconds = 0;
   state.controls = { ...DEFAULT_CONTROLS };
@@ -683,8 +940,12 @@ function resetSimulation() {
     state.samples[key] = [];
   });
 
+  state.analytics = { stoppedSeconds: 0, sessionStarted: false };
+
   state.metrics = {
     totalProduction: 0,
+    expectedProductionTotal: 0,
+    peakProductionRate: 0,
     sessionEnergyKWh: 0,
     peakPower: DEFAULT_SENSOR_VALUES.power.value,
     runningPowerSum: 0,
@@ -704,6 +965,11 @@ function resetSimulation() {
   addEvent('SYSTEM', 'Simulation reset', 'Dashboard returned to safe initial conditions', 'STOPPED');
   refreshUi();
   drawCharts();
+
+  if (hadSessionActivity) {
+    renderSessionSummary(lastSessionSnapshot);
+    dom.summaryModal.hidden = false;
+  }
 }
 
 /* ------------------------- Layout helpers ------------------------- */
@@ -741,12 +1007,14 @@ function refreshUi() {
 
 function simulationTick() {
   if (state.factoryRunning) state.elapsedSeconds += TICK_SECONDS;
+  else if (state.analytics.sessionStarted) state.analytics.stoppedSeconds += TICK_SECONDS;
 
   calculateTargets();
   updateSensors();
   recordSamples();
   evaluateAlarms();
   updateDerivedMetrics();
+  recordProductionSample();
 
   dom.simulationClock.textContent = formatClock(state.elapsedSeconds);
   updateSummary();
@@ -773,6 +1041,9 @@ function initialize() {
   drawCharts();
   window.addEventListener('resize', drawCharts);
   window.setInterval(simulationTick, TICK_SECONDS * 1000);
+
+  dom.summaryOpenBtn.addEventListener('click', showSessionSummary);
+  dom.summaryCloseBtn.addEventListener('click', hideSessionSummary);
 }
 
 initialize();
