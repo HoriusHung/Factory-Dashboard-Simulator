@@ -1,0 +1,12 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+auth.json
+secrets/
+
+# Dependencies and tools
+node_modules/
+.DS_Store
